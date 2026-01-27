@@ -2,6 +2,10 @@ const request = require('supertest');
 const app = require('../service');
 const { Role, DB } = require('../database/database.js');
 
+if (process.env.VSCODE_INSPECTOR_OPTIONS) {
+  jest.setTimeout(60 * 1000 * 5); // 5 minutes
+}
+
 function randomName() {
   return Math.random().toString(36).substring(2, 12);
 }
