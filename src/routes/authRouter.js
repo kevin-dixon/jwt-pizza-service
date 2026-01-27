@@ -6,6 +6,8 @@ const { DB, Role } = require('../database/database.js');
 
 const authRouter = express.Router();
 
+const notused = null; // Placeholder to avoid lint error for now.
+
 authRouter.docs = [
   {
     method: 'POST',
