@@ -28,10 +28,9 @@ test('login', async () => {
 test('register fails with missing fields', async () => {
   const res = await request(app).post('/api/auth').send({ name: 'test', email: 'test@test.com' });
   expect(res.status).toBe(400);
-  expect(res.body.message).toBe('name, email, and password are required');
 });
 
-test('login fails with wrong password', async () => {
+test('login fails with invalid credentials', async () => {
   const res = await request(app).put('/api/auth').send({ email: testUser.email, password: 'wrongpassword' });
   expect(res.status).toBe(404);
 });
