@@ -43,6 +43,16 @@ test('update user', async () => {
   expect(res.status).toBe(200);
   expect(res.body.user.name).toBe('updated name');
   expect(res.body.token).toBeDefined();
+
+  // Verify can login with new password
+  const loginRes = await request(app).put('/api/auth').send({ email: newUser.email, password: 'newpassword' });
+  expect(loginRes.status).toBe(200);
+  expect(loginRes.body.user.name).toBe('updated name');
+});
+
+test('get current user requires authentication', async () => {
+  const res = await request(app).get('/api/user/me');
+  expect(res.status).toBe(401);
 });
 
 test('update user fails without authorization', async () => {
@@ -58,4 +68,11 @@ test('update user fails without authorization', async () => {
     .send({ email: otherUser.body.user.email, name: 'hacker', password: 'hacked' });
 
   expect(res.status).toBe(403);
+});
+
+test('update user requires authentication', async () => {
+  const res = await request(app)
+    .put('/api/user/999')
+    .send({ email: 'test@test.com', name: 'test', password: 'test' });
+  expect(res.status).toBe(401);
 });

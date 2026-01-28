@@ -93,6 +93,19 @@ test('get user franchises', async () => {
   expect(res.body.some(f => f.name === franchiseName)).toBe(true);
 });
 
+test('get user franchises requires authentication', async () => {
+  const res = await request(app).get(`/api/franchise/${adminUser.id}`);
+  expect(res.status).toBe(401);
+});
+
+test('get user franchises returns empty for other user', async () => {
+  const res = await request(app)
+    .get(`/api/franchise/${adminUser.id}`)
+    .set('Authorization', `Bearer ${testUserAuthToken}`);
+  expect(res.status).toBe(200);
+  expect(res.body).toEqual([]);
+});
+
 test('create store as franchise admin', async () => {
   const franchise = {
     name: randomName(),
@@ -150,6 +163,24 @@ test('delete store', async () => {
 
   expect(res.status).toBe(200);
   expect(res.body.message).toBe('store deleted');
+});
+
+test('delete store fails without proper authorization', async () => {
+  const franchiseRes = await request(app)
+    .post('/api/franchise')
+    .set('Authorization', `Bearer ${adminAuthToken}`)
+    .send({ name: randomName(), admins: [{ email: adminUser.email }] });
+
+  const storeRes = await request(app)
+    .post(`/api/franchise/${franchiseRes.body.id}/store`)
+    .set('Authorization', `Bearer ${adminAuthToken}`)
+    .send({ name: 'DeleteTest' });
+
+  const res = await request(app)
+    .delete(`/api/franchise/${franchiseRes.body.id}/store/${storeRes.body.id}`)
+    .set('Authorization', `Bearer ${testUserAuthToken}`);
+
+  expect(res.status).toBe(403);
 });
 
 test('delete franchise', async () => {

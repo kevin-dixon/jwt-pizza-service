@@ -84,6 +84,11 @@ test('get orders for authenticated user', async () => {
   expect(Array.isArray(res.body.orders)).toBe(true);
 });
 
+test('get orders requires authentication', async () => {
+  const res = await request(app).get('/api/order');
+  expect(res.status).toBe(401);
+});
+
 test('create order', async () => {
   // Create menu item
   const menuItem = {
