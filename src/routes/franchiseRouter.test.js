@@ -73,8 +73,9 @@ test('create franchise fails without admin', async () => {
 });
 
 test('get user franchises', async () => {
+  const franchiseName = randomName();
   const franchise = {
-    name: randomName(),
+    name: franchiseName,
     admins: [{ email: adminUser.email }],
   };
 
@@ -89,6 +90,7 @@ test('get user franchises', async () => {
 
   expect(res.status).toBe(200);
   expect(Array.isArray(res.body)).toBe(true);
+  expect(res.body.some(f => f.name === franchiseName)).toBe(true);
 });
 
 test('create store as franchise admin', async () => {
@@ -97,22 +99,19 @@ test('create store as franchise admin', async () => {
     admins: [{ email: adminUser.email }],
   };
 
-  const createRes = await request(app)
+  const franchiseRes = await request(app)
     .post('/api/franchise')
     .set('Authorization', `Bearer ${adminAuthToken}`)
     .send(franchise);
 
-  const franchiseId = createRes.body.id;
-  const store = { name: 'SLC' };
-
   const res = await request(app)
-    .post(`/api/franchise/${franchiseId}/store`)
+    .post(`/api/franchise/${franchiseRes.body.id}/store`)
     .set('Authorization', `Bearer ${adminAuthToken}`)
-    .send(store);
+    .send({ name: 'SLC' });
 
   expect(res.status).toBe(200);
-  expect(res.body).toHaveProperty('name', 'SLC');
-  expect(res.body).toHaveProperty('id');
+  expect(res.body.name).toBe('SLC');
+  expect(res.body.id).toBeDefined();
 });
 
 test('create store fails without proper authorization', async () => {
@@ -121,66 +120,46 @@ test('create store fails without proper authorization', async () => {
     admins: [{ email: adminUser.email }],
   };
 
-  const createRes = await request(app)
+  const franchiseRes = await request(app)
     .post('/api/franchise')
     .set('Authorization', `Bearer ${adminAuthToken}`)
     .send(franchise);
 
-  const franchiseId = createRes.body.id;
-  const store = { name: 'Provo' };
-
   const res = await request(app)
-    .post(`/api/franchise/${franchiseId}/store`)
+    .post(`/api/franchise/${franchiseRes.body.id}/store`)
     .set('Authorization', `Bearer ${testUserAuthToken}`)
-    .send(store);
+    .send({ name: 'Provo' });
 
   expect(res.status).toBe(403);
 });
 
 test('delete store', async () => {
-  const franchise = {
-    name: randomName(),
-    admins: [{ email: adminUser.email }],
-  };
-
-  const createFranchiseRes = await request(app)
+  const franchiseRes = await request(app)
     .post('/api/franchise')
     .set('Authorization', `Bearer ${adminAuthToken}`)
-    .send(franchise);
+    .send({ name: randomName(), admins: [{ email: adminUser.email }] });
 
-  const franchiseId = createFranchiseRes.body.id;
-  const store = { name: 'Orem' };
-
-  const createStoreRes = await request(app)
-    .post(`/api/franchise/${franchiseId}/store`)
+  const storeRes = await request(app)
+    .post(`/api/franchise/${franchiseRes.body.id}/store`)
     .set('Authorization', `Bearer ${adminAuthToken}`)
-    .send(store);
-
-  const storeId = createStoreRes.body.id;
+    .send({ name: 'Orem' });
 
   const res = await request(app)
-    .delete(`/api/franchise/${franchiseId}/store/${storeId}`)
+    .delete(`/api/franchise/${franchiseRes.body.id}/store/${storeRes.body.id}`)
     .set('Authorization', `Bearer ${adminAuthToken}`);
 
   expect(res.status).toBe(200);
-  expect(res.body).toHaveProperty('message', 'store deleted');
+  expect(res.body.message).toBe('store deleted');
 });
 
 test('delete franchise', async () => {
-  const franchise = {
-    name: randomName(),
-    admins: [{ email: adminUser.email }],
-  };
-
-  const createRes = await request(app)
+  const franchiseRes = await request(app)
     .post('/api/franchise')
     .set('Authorization', `Bearer ${adminAuthToken}`)
-    .send(franchise);
+    .send({ name: randomName(), admins: [{ email: adminUser.email }] });
 
-  const franchiseId = createRes.body.id;
-
-  const res = await request(app).delete(`/api/franchise/${franchiseId}`);
+  const res = await request(app).delete(`/api/franchise/${franchiseRes.body.id}`);
 
   expect(res.status).toBe(200);
-  expect(res.body).toHaveProperty('message', 'franchise deleted');
+  expect(res.body.message).toBe('franchise deleted');
 });

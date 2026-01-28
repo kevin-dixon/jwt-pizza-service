@@ -30,51 +30,32 @@ test('get current user', async () => {
 });
 
 test('update user', async () => {
-  const registerRes = await request(app).post('/api/auth').send({
-    name: 'update test',
-    email: randomName() + '@test.com',
-    password: 'password',
-  });
-
+  const newUser = { name: 'update test', email: randomName() + '@test.com', password: 'password' };
+  const registerRes = await request(app).post('/api/auth').send(newUser);
   const userId = registerRes.body.user.id;
   const authToken = registerRes.body.token;
-
-  const updatedData = {
-    name: 'updated name',
-    email: registerRes.body.user.email,
-    password: 'newpassword',
-  };
 
   const res = await request(app)
     .put(`/api/user/${userId}`)
     .set('Authorization', `Bearer ${authToken}`)
-    .send(updatedData);
+    .send({ email: newUser.email, name: 'updated name', password: 'newpassword' });
 
   expect(res.status).toBe(200);
-  expect(res.body).toHaveProperty('user');
-  expect(res.body.user).toHaveProperty('name', updatedData.name);
-  expect(res.body).toHaveProperty('token');
+  expect(res.body.user.name).toBe('updated name');
+  expect(res.body.token).toBeDefined();
 });
 
 test('update user fails without authorization', async () => {
-  const registerRes = await request(app).post('/api/auth').send({
+  const otherUser = await request(app).post('/api/auth').send({
     name: 'another user',
     email: randomName() + '@test.com',
     password: 'password',
   });
 
-  const userId = registerRes.body.user.id;
-
-  const updatedData = {
-    name: 'hacker',
-    email: registerRes.body.user.email,
-    password: 'hacked',
-  };
-
   const res = await request(app)
-    .put(`/api/user/${userId}`)
+    .put(`/api/user/${otherUser.body.user.id}`)
     .set('Authorization', `Bearer ${testUserAuthToken}`)
-    .send(updatedData);
+    .send({ email: otherUser.body.user.email, name: 'hacker', password: 'hacked' });
 
   expect(res.status).toBe(403);
 });

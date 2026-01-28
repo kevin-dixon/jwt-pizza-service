@@ -85,37 +85,41 @@ test('get orders for authenticated user', async () => {
 });
 
 test('create order', async () => {
-  const franchise = {
-    name: randomName(),
-    admins: [{ email: adminUser.email }],
+  // Create menu item
+  const menuItem = {
+    title: randomName(),
+    description: 'Test pizza',
+    image: 'pizza.png',
+    price: 0.001,
   };
+  await request(app)
+    .put('/api/order/menu')
+    .set('Authorization', `Bearer ${adminAuthToken}`)
+    .send(menuItem);
 
+  const menuRes = await request(app).get('/api/order/menu');
+  const addedItem = menuRes.body.find(item => item.title === menuItem.title);
+
+  // Create franchise and store
   const franchiseRes = await request(app)
     .post('/api/franchise')
     .set('Authorization', `Bearer ${adminAuthToken}`)
-    .send(franchise);
+    .send({ name: randomName(), admins: [{ email: adminUser.email }] });
 
-  const franchiseId = franchiseRes.body.id;
-
-  const store = { name: 'TestStore' };
   const storeRes = await request(app)
-    .post(`/api/franchise/${franchiseId}/store`)
+    .post(`/api/franchise/${franchiseRes.body.id}/store`)
     .set('Authorization', `Bearer ${adminAuthToken}`)
-    .send(store);
+    .send({ name: 'TestStore' });
 
-  const storeId = storeRes.body.id;
-
-  const menuRes = await request(app).get('/api/order/menu');
-  const menuItem = menuRes.body[0];
-
+  // Create order
   const order = {
-    franchiseId: franchiseId,
-    storeId: storeId,
+    franchiseId: franchiseRes.body.id,
+    storeId: storeRes.body.id,
     items: [
       {
-        menuId: menuItem.id,
-        description: menuItem.title,
-        price: menuItem.price,
+        menuId: addedItem.id,
+        description: addedItem.title,
+        price: addedItem.price,
       },
     ],
   };
@@ -126,6 +130,6 @@ test('create order', async () => {
     .send(order);
 
   expect(res.status).toBe(200);
-  expect(res.body).toHaveProperty('order');
-  expect(res.body.order).toHaveProperty('id');
+  expect(res.body.order).toBeDefined();
+  expect(res.body.order.id).toBeDefined();
 });

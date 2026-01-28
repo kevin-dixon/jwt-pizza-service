@@ -26,11 +26,11 @@ test('login', async () => {
 });
 
 test('logout', async () => {
-  const logoutRes = await request(app)
+  const res = await request(app)
     .delete('/api/auth')
     .set('Authorization', `Bearer ${testUserAuthToken}`);
-  expect(logoutRes.status).toBe(200);
-  expect(logoutRes.body).toHaveProperty('message', 'logout successful');
+  expect(res.status).toBe(200);
+  expect(res.body.message).toBe('logout successful');
 });
 
 function expectValidJwt(potentialJwt) {
