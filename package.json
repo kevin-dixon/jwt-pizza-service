@@ -2,9 +2,9 @@
   "name": "jwt-pizza-service",
   "description": "Backend service for making JWT pizzas",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "src/index.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "node src/index.js",
     "run": "cd src && node index.js",
     "test": "jest",
     "lint": "eslint ."
