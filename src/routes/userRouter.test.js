@@ -64,3 +64,66 @@ test('update user requires authentication', async () => {
     .send({ email: 'test@test.com', name: 'test', password: 'test' });
   expect(res.status).toBe(401);
 });
+
+test('list users requires authentication', async () => {
+  const res = await request(app).get('/api/user');
+  expect(res.status).toBe(401);
+});
+
+test('list users requires admin role', async () => {
+  const diner = await createTestUser();
+  const res = await request(app)
+    .get('/api/user')
+    .set('Authorization', `Bearer ${diner.token}`);
+
+  expect(res.status).toBe(403);
+});
+
+test('list users returns paged, filtered users for admin', async () => {
+  const suffix = randomName();
+  await request(app).post('/api/auth').send({ name: `filter-${suffix}`, email: `${suffix}@test.com`, password: 'a' });
+  await request(app).post('/api/auth').send({ name: `other-${suffix}`, email: `other-${suffix}@test.com`, password: 'a' });
+
+  const adminLogin = await request(app).put('/api/auth').send({ email: 'a@jwt.com', password: 'admin' });
+  const res = await request(app)
+    .get(`/api/user?page=0&limit=10&name=*${suffix}*`)
+    .set('Authorization', `Bearer ${adminLogin.body.token}`);
+
+  expect(res.status).toBe(200);
+  expect(Array.isArray(res.body.users)).toBe(true);
+  expect(typeof res.body.more).toBe('boolean');
+  expect(res.body.users.length).toBeGreaterThanOrEqual(1);
+  expect(res.body.users.some((u) => (u.name || '').includes(suffix))).toBe(true);
+  expect(Array.isArray(res.body.users[0].roles)).toBe(true);
+});
+
+test('delete user requires authentication', async () => {
+  const target = await createTestUser();
+  const res = await request(app).delete(`/api/user/${target.id}`);
+  expect(res.status).toBe(401);
+});
+
+test('delete user requires admin role', async () => {
+  const target = await createTestUser();
+  const diner = await createTestUser();
+
+  const res = await request(app)
+    .delete(`/api/user/${target.id}`)
+    .set('Authorization', `Bearer ${diner.token}`);
+
+  expect(res.status).toBe(403);
+});
+
+test('admin can delete user', async () => {
+  const target = await createTestUser();
+  const adminLogin = await request(app).put('/api/auth').send({ email: 'a@jwt.com', password: 'admin' });
+
+  const deleteRes = await request(app)
+    .delete(`/api/user/${target.id}`)
+    .set('Authorization', `Bearer ${adminLogin.body.token}`);
+
+  expect(deleteRes.status).toBe(200);
+
+  const loginRes = await request(app).put('/api/auth').send({ email: target.user.email, password: target.user.password });
+  expect(loginRes.status).toBe(404);
+});
