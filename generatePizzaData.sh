@@ -24,4 +24,5 @@ curl -X PUT $host/api/order/menu -H 'Content-Type: application/json' -d '{ "titl
 curl -X POST $host/api/franchise -H 'Content-Type: application/json' -d '{"name": "pizzaPocket", "admins": [{"email": "f@jwt.com"}]}'  -H "Authorization: Bearer $token"
 curl -X POST $host/api/franchise/1/store -H 'Content-Type: application/json' -d '{"franchiseId": 1, "name":"SLC"}'  -H "Authorization: Bearer $token"
 
+# print finished message
 echo "Database data generated"
