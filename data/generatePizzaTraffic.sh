@@ -8,6 +8,11 @@ if [ -z "$1" ]; then
 fi
 host=$1
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "Error: jq is required. Install jq and rerun this script."
+  exit 1
+fi
+
 # Trap SIGINT (Ctrl+C) to execute the cleanup function
 cleanup() {
   echo "Terminating background processes..."
@@ -77,8 +82,9 @@ while true; do
   for (( i=0; i < 21; i++ ))
   do items+=', { "menuId": 1, "description": "Veggie", "price": 0.05 }'
   done
-  
-  result=$(execute_curl "-X POST $host/api/order -H 'Content-Type: application/json' -d '{\"franchiseId\": 1, \"storeId\":1, \"items\":[$items]}'  -H \"Authorization: Bearer $token\"")
+
+  payload="{\"franchiseId\":1,\"storeId\":1,\"items\":[${items}]}"
+  result=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$host/api/order" -H 'Content-Type: application/json' -d "$payload" -H "Authorization: Bearer $token")
   echo "Bought too many pizzas..." $result  
   sleep 5
   result=$(execute_curl "-X DELETE $host/api/auth -H \"Authorization: Bearer $token\"")
