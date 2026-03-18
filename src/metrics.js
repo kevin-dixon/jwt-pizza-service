@@ -96,11 +96,13 @@ function createMetric(
   attributes = {},
 ) {
   const fullAttributes = { ...attributes, source: config.metrics.source };
+  const numericValue = Number(metricValue) || 0;
+  const valueKey = Number.isInteger(numericValue) ? "asInt" : "asDouble";
   const dataPoint = {
-    asInt: Math.round(metricValue),
     timeUnixNano: Date.now() * 1000000,
     attributes: [],
   };
+  dataPoint[valueKey] = numericValue;
 
   Object.keys(fullAttributes).forEach((key) => {
     dataPoint.attributes.push({
