@@ -30,20 +30,24 @@ fi
 
 echo "Deleting all orders..."
 ordersDeleteCode=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$host/api/order" -H "Authorization: Bearer $token")
-echo "  orders -> $ordersDeleteCode"
+if [ "$ordersDeleteCode" = "404" ]; then
+  echo "  orders -> 404 (endpoint not deployed on this service yet; continuing)"
+else
+  echo "  orders -> $ordersDeleteCode"
+fi
 
 echo "Deleting all franchises..."
-franchises=$(curl -s "$host/api/franchise?page=0&limit=500&name=*" -H "Authorization: Bearer $token")
-echo "$franchises" | jq -r '.franchises[]?.id' | while read -r franchiseId; do
+franchises=$(curl -s "$host/api/franchise?page=0&limit=500&name=%2A" -H "Authorization: Bearer $token")
+echo "$franchises" | jq -r '(.franchises // [])[] | .id' | tr -d '\r' | while read -r franchiseId; do
   [ -z "$franchiseId" ] && continue
   code=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$host/api/franchise/$franchiseId" -H "Authorization: Bearer $token")
   echo "  franchise $franchiseId -> $code"
 done
 
 echo "Deleting all non-admin users..."
-users=$(curl -s "$host/api/user?page=0&limit=500&name=*" -H "Authorization: Bearer $token")
-echo "$users" | jq -c '.users[]?' | while read -r user; do
-  userId=$(echo "$user" | jq -r '.id')
+users=$(curl -s "$host/api/user?page=0&limit=500&name=%2A" -H "Authorization: Bearer $token")
+echo "$users" | jq -c '(.users // [])[]' | tr -d '\r' | while read -r user; do
+  userId=$(echo "$user" | jq -r '.id' | tr -d '\r')
   isAdmin=$(echo "$user" | jq -r 'any(.roles[]?; .role == "admin")')
   if [ "$isAdmin" != "true" ]; then
     code=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$host/api/user/$userId" -H "Authorization: Bearer $token")
@@ -53,9 +57,17 @@ done
 
 echo "Deleting all menu items..."
 menu=$(curl -s "$host/api/order/menu")
-echo "$menu" | jq -r '.[]?.id' | while read -r menuId; do
+menuDeleteUnsupported=0
+mapfile -t menuIds < <(echo "$menu" | jq -r '(. // [])[] | .id' | tr -d '\r')
+for menuId in "${menuIds[@]}"; do
+  menuId=$(echo "$menuId" | tr -d '\r')
   [ -z "$menuId" ] && continue
   code=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$host/api/order/menu/$menuId" -H "Authorization: Bearer $token")
+  if [ "$code" = "404" ]; then
+    echo "  menu delete endpoint not deployed on this service; skipping menu delete pass"
+    menuDeleteUnsupported=1
+    break
+  fi
   echo "  menu item $menuId -> $code"
 done
 
@@ -77,13 +89,18 @@ curl -s -o /dev/null -w "  d4@jwt.com: %{http_code}\n" -X POST "$host/api/auth" 
 curl -s -o /dev/null -w "  d5@jwt.com: %{http_code}\n" -X POST "$host/api/auth" -d '{"name":"pizza diner 5",  "email":"d5@jwt.com", "password":"diner5"}' -H 'Content-Type: application/json'
 curl -s -o /dev/null -w "  d6@jwt.com: %{http_code}\n" -X POST "$host/api/auth" -d '{"name":"pizza diner 6",  "email":"d6@jwt.com", "password":"diner6"}' -H 'Content-Type: application/json'
 
-echo "Creating baseline menu..."
-curl -s -X PUT "$host/api/order/menu" -H 'Content-Type: application/json' -d '{ "title":"Veggie", "description": "A garden of delight", "image":"pizza1.png", "price": 0.0038 }' -H "Authorization: Bearer $token" >/dev/null
-curl -s -X PUT "$host/api/order/menu" -H 'Content-Type: application/json' -d '{ "title":"Pepperoni", "description": "Spicy treat", "image":"pizza2.png", "price": 0.0042 }' -H "Authorization: Bearer $token" >/dev/null
-curl -s -X PUT "$host/api/order/menu" -H 'Content-Type: application/json' -d '{ "title":"Margarita", "description": "Essential classic", "image":"pizza3.png", "price": 0.0042 }' -H "Authorization: Bearer $token" >/dev/null
-curl -s -X PUT "$host/api/order/menu" -H 'Content-Type: application/json' -d '{ "title":"Crusty", "description": "A dry mouthed favorite", "image":"pizza4.png", "price": 0.0028 }' -H "Authorization: Bearer $token" >/dev/null
-curl -s -X PUT "$host/api/order/menu" -H 'Content-Type: application/json' -d '{ "title":"Charred Leopard", "description": "For those with a darker side", "image":"pizza5.png", "price": 0.0099 }' -H "Authorization: Bearer $token" >/dev/null
-echo "  baseline menu created"
+currentMenuCount=$(curl -s "$host/api/order/menu" | jq 'length')
+if [ "$menuDeleteUnsupported" = "1" ] && [ "$currentMenuCount" -gt 0 ]; then
+  echo "Skipping baseline menu create to avoid duplicates on older service API."
+else
+  echo "Creating baseline menu..."
+  curl -s -X PUT "$host/api/order/menu" -H 'Content-Type: application/json' -d '{ "title":"Veggie", "description": "A garden of delight", "image":"pizza1.png", "price": 0.0038 }' -H "Authorization: Bearer $token" >/dev/null
+  curl -s -X PUT "$host/api/order/menu" -H 'Content-Type: application/json' -d '{ "title":"Pepperoni", "description": "Spicy treat", "image":"pizza2.png", "price": 0.0042 }' -H "Authorization: Bearer $token" >/dev/null
+  curl -s -X PUT "$host/api/order/menu" -H 'Content-Type: application/json' -d '{ "title":"Margarita", "description": "Essential classic", "image":"pizza3.png", "price": 0.0042 }' -H "Authorization: Bearer $token" >/dev/null
+  curl -s -X PUT "$host/api/order/menu" -H 'Content-Type: application/json' -d '{ "title":"Crusty", "description": "A dry mouthed favorite", "image":"pizza4.png", "price": 0.0028 }' -H "Authorization: Bearer $token" >/dev/null
+  curl -s -X PUT "$host/api/order/menu" -H 'Content-Type: application/json' -d '{ "title":"Charred Leopard", "description": "For those with a darker side", "image":"pizza5.png", "price": 0.0099 }' -H "Authorization: Bearer $token" >/dev/null
+  echo "  baseline menu created"
+fi
 
 echo "Creating baseline franchise and store..."
 createFranchiseResponse=$(curl -s -X POST "$host/api/franchise" -H 'Content-Type: application/json' -d '{"name": "pizzaPocket", "admins": [{"email": "f@jwt.com"}]}' -H "Authorization: Bearer $token")
