@@ -24,6 +24,25 @@ const pizzaMetrics = {
 const activeUsers = new Set();
 
 let reporterTimer = null;
+let previousCpuSample = null;
+
+function sampleCpuTimes() {
+  const cpus = os.cpus();
+  let idle = 0;
+  let total = 0;
+
+  for (const cpu of cpus) {
+    idle += cpu.times.idle;
+    total +=
+      cpu.times.user +
+      cpu.times.nice +
+      cpu.times.sys +
+      cpu.times.irq +
+      cpu.times.idle;
+  }
+
+  return { idle, total };
+}
 
 function requestTracker(req, res, next) {
   const start = Date.now();
@@ -77,8 +96,23 @@ function pizzaPurchase(success, latencyMs, totalPrice, pizzaCount) {
 }
 
 function getCpuUsagePercentage() {
-  const cpuUsage = os.loadavg()[0] / os.cpus().length;
-  return Math.max(0, Math.round(cpuUsage * 100));
+  const currentSample = sampleCpuTimes();
+
+  if (!previousCpuSample) {
+    previousCpuSample = currentSample;
+    return 0;
+  }
+
+  const idleDelta = currentSample.idle - previousCpuSample.idle;
+  const totalDelta = currentSample.total - previousCpuSample.total;
+  previousCpuSample = currentSample;
+
+  if (totalDelta <= 0) {
+    return 0;
+  }
+
+  const usage = (1 - idleDelta / totalDelta) * 100;
+  return Math.max(0, Math.min(100, Math.round(usage)));
 }
 
 function getMemoryUsagePercentage() {
@@ -113,11 +147,14 @@ function createMetric(
 
   const metric = {
     name: metricName,
-    unit: metricUnit,
     [metricType]: {
       dataPoints: [dataPoint],
     },
   };
+
+  if (metricUnit) {
+    metric.unit = metricUnit;
+  }
 
   if (metricType === "sum") {
     metric[metricType].aggregationTemporality =
@@ -152,7 +189,9 @@ function buildMetricBatch() {
       result: "failed",
     }),
   );
-  metrics.push(createMetric("active_users", activeUsers.size, "1", "gauge"));
+  metrics.push(
+    createMetric("active_users_count", activeUsers.size, "", "gauge"),
+  );
 
   metrics.push(createMetric("pizzas_sold", pizzaMetrics.sold, "1", "sum"));
   metrics.push(
