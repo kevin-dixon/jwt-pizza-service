@@ -33,6 +33,47 @@ class DB {
     }
   }
 
+  async updateMenuItem(menuId, item) {
+    const connection = await this.getConnection();
+    try {
+      const result = await this.query(
+        connection,
+        `UPDATE menu SET title=?, description=?, image=?, price=? WHERE id=?`,
+        [item.title, item.description, item.image, item.price, menuId],
+      );
+
+      if (!result.affectedRows) {
+        throw new StatusCodeError("unknown menu item", 404);
+      }
+
+      return {
+        id: menuId,
+        title: item.title,
+        description: item.description,
+        image: item.image,
+        price: item.price,
+      };
+    } finally {
+      connection.end();
+    }
+  }
+
+  async deleteMenuItem(menuId) {
+    const connection = await this.getConnection();
+    try {
+      const result = await this.query(
+        connection,
+        `DELETE FROM menu WHERE id=?`,
+        [menuId],
+      );
+      if (!result.affectedRows) {
+        throw new StatusCodeError("unknown menu item", 404);
+      }
+    } finally {
+      connection.end();
+    }
+  }
+
   async addUser(user) {
     const connection = await this.getConnection();
     try {
@@ -279,6 +320,23 @@ class DB {
         );
       }
       return { ...order, id: orderId };
+    } finally {
+      connection.end();
+    }
+  }
+
+  async deleteAllOrders() {
+    const connection = await this.getConnection();
+    try {
+      await connection.beginTransaction();
+      try {
+        await this.query(connection, `DELETE FROM orderItem`);
+        await this.query(connection, `DELETE FROM dinerOrder`);
+        await connection.commit();
+      } catch {
+        await connection.rollback();
+        throw new StatusCodeError("unable to delete orders", 500);
+      }
     } finally {
       connection.end();
     }

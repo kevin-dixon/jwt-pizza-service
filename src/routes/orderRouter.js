@@ -40,6 +40,28 @@ orderRouter.docs = [
     ],
   },
   {
+    method: "PUT",
+    path: "/api/order/menu/:menuId",
+    requiresAuth: true,
+    description: "Update a menu item",
+    example: `curl -X PUT localhost:3000/api/order/menu/1 -H 'Content-Type: application/json' -d '{ "title":"Veggie Plus", "description": "Still green, now bigger", "image":"pizza1.png", "price": 0.0041 }' -H 'Authorization: Bearer tttttt'`,
+    response: {
+      id: 1,
+      title: "Veggie Plus",
+      description: "Still green, now bigger",
+      image: "pizza1.png",
+      price: 0.0041,
+    },
+  },
+  {
+    method: "DELETE",
+    path: "/api/order/menu/:menuId",
+    requiresAuth: true,
+    description: "Delete a menu item",
+    example: `curl -X DELETE localhost:3000/api/order/menu/1 -H 'Authorization: Bearer tttttt'`,
+    response: { message: "menu item deleted" },
+  },
+  {
     method: "GET",
     path: "/api/order",
     requiresAuth: true,
@@ -58,6 +80,14 @@ orderRouter.docs = [
       ],
       page: 1,
     },
+  },
+  {
+    method: "DELETE",
+    path: "/api/order",
+    requiresAuth: true,
+    description: "Delete all orders (admin only)",
+    example: `curl -X DELETE localhost:3000/api/order -H 'Authorization: Bearer tttttt'`,
+    response: { message: "all orders deleted" },
   },
   {
     method: "POST",
@@ -100,12 +130,57 @@ orderRouter.put(
   }),
 );
 
+// updateMenuItem
+orderRouter.put(
+  "/menu/:menuId",
+  authRouter.authenticateToken,
+  asyncHandler(async (req, res) => {
+    if (!req.user.isRole(Role.Admin)) {
+      throw new StatusCodeError("unable to update menu item", 403);
+    }
+
+    const menuId = Number(req.params.menuId);
+    const updateMenuItemReq = req.body;
+    const updatedItem = await DB.updateMenuItem(menuId, updateMenuItemReq);
+    res.send(updatedItem);
+  }),
+);
+
+// deleteMenuItem
+orderRouter.delete(
+  "/menu/:menuId",
+  authRouter.authenticateToken,
+  asyncHandler(async (req, res) => {
+    if (!req.user.isRole(Role.Admin)) {
+      throw new StatusCodeError("unable to delete menu item", 403);
+    }
+
+    const menuId = Number(req.params.menuId);
+    await DB.deleteMenuItem(menuId);
+    res.send({ message: "menu item deleted" });
+  }),
+);
+
 // getOrders
 orderRouter.get(
   "/",
   authRouter.authenticateToken,
   asyncHandler(async (req, res) => {
     res.json(await DB.getOrders(req.user, req.query.page));
+  }),
+);
+
+// deleteAllOrders
+orderRouter.delete(
+  "/",
+  authRouter.authenticateToken,
+  asyncHandler(async (req, res) => {
+    if (!req.user.isRole(Role.Admin)) {
+      throw new StatusCodeError("unable to delete orders", 403);
+    }
+
+    await DB.deleteAllOrders();
+    res.send({ message: "all orders deleted" });
   }),
 );
 
