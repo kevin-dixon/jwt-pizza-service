@@ -73,19 +73,14 @@ while true; do
 done &
 pid4=$!
 
-# Simulate a failed pizza order every 5 minutes
+# Simulate a fast-failing pizza order every 5 minutes (keeps failure metrics without extreme latency spikes)
 while true; do
   token=$(login "d@jwt.com" "diner")
   echo "Login hungry diner..." $( [ -z "$token" ] && echo "false" || echo "true" )
 
-  items='{ "menuId": 1, "description": "Veggie", "price": 0.05 }'
-  for (( i=0; i < 21; i++ ))
-  do items+=', { "menuId": 1, "description": "Veggie", "price": 0.05 }'
-  done
-
-  payload="{\"franchiseId\":1,\"storeId\":1,\"items\":[${items}]}"
+  payload='{"franchiseId":1,"storeId":9999,"items":[{ "menuId": 1, "description": "Veggie", "price": 0.05 }]}'
   result=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$host/api/order" -H 'Content-Type: application/json' -d "$payload" -H "Authorization: Bearer $token")
-  echo "Bought too many pizzas..." $result  
+  echo "Submitted intentionally invalid order..." $result
   sleep 5
   result=$(execute_curl "-X DELETE $host/api/auth -H \"Authorization: Bearer $token\"")
   echo "Logging out hungry diner..." $result
