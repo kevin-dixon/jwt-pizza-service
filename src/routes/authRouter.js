@@ -2,6 +2,7 @@ const express = require("express");
 const jwt = require("jsonwebtoken");
 const config = require("../config.js");
 const metrics = require("../metrics.js");
+const logger = require("../logger.js");
 const { asyncHandler } = require("../endpointHelper.js");
 const { DB, Role } = require("../database/database.js");
 
@@ -90,6 +91,11 @@ authRouter.post(
       roles: [{ role: Role.Diner }],
     });
     const auth = await setAuth(user);
+    logger.log("info", "auth", "user registered", {
+      userId: user.id,
+      email: user.email,
+      roles: JSON.stringify(user.roles),
+    });
     res.json({ user: user, token: auth });
   }),
 );
@@ -104,9 +110,14 @@ authRouter.put(
       const auth = await setAuth(user);
       metrics.authAttempt(true);
       metrics.userLoggedIn(user.id);
+      logger.log("info", "auth", "login success", {
+        userId: user.id,
+        email: user.email,
+      });
       res.json({ user: user, token: auth });
     } catch (error) {
       metrics.authAttempt(false);
+      logger.log("warn", "auth", "login failed", { email: email ?? "unknown" });
       throw error;
     }
   }),
@@ -119,6 +130,10 @@ authRouter.delete(
   asyncHandler(async (req, res) => {
     await clearAuth(req);
     metrics.userLoggedOut(req.user.id);
+    logger.log("info", "auth", "logout", {
+      userId: req.user.id,
+      email: req.user.email,
+    });
     res.json({ message: "logout successful" });
   }),
 );

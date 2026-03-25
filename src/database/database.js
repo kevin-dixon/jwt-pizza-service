@@ -528,6 +528,8 @@ class DB {
   }
 
   async query(connection, sql, params) {
+    const logger = require("../logger.js");
+    logger.log("info", "sql", sql, { params: JSON.stringify(params ?? []) });
     const [results] = await connection.execute(sql, params);
     return results;
   }

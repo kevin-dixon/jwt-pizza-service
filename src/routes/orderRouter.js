@@ -1,6 +1,7 @@
 const express = require("express");
 const config = require("../config.js");
 const metrics = require("../metrics.js");
+const logger = require("../logger.js");
 const { Role, DB } = require("../database/database.js");
 const { authRouter } = require("./authRouter.js");
 const { asyncHandler, StatusCodeError } = require("../endpointHelper.js");
@@ -193,23 +194,36 @@ orderRouter.post(
     const start = Date.now();
     try {
       const order = await DB.addDinerOrder(req.user, orderReq);
+      const factoryReqBody = {
+        diner: {
+          id: req.user.id,
+          name: req.user.name,
+          email: req.user.email,
+        },
+        order,
+      };
+      logger.log("info", "factory-req", "Sending order to factory", {
+        body: JSON.stringify(factoryReqBody),
+      });
       const r = await fetch(`${config.factory.url}/api/order`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           authorization: `Bearer ${config.factory.apiKey}`,
         },
-        body: JSON.stringify({
-          diner: {
-            id: req.user.id,
-            name: req.user.name,
-            email: req.user.email,
-          },
-          order,
-        }),
+        body: JSON.stringify(factoryReqBody),
       });
       const latencyMs = Date.now() - start;
       const j = await r.json();
+      logger.log(
+        r.ok ? "info" : "warn",
+        "factory-res",
+        "Received factory response",
+        {
+          status: r.status,
+          body: JSON.stringify(logger.sanitize(j)),
+        },
+      );
       if (r.ok) {
         const pizzaCount = Array.isArray(orderReq.items)
           ? orderReq.items.length
@@ -221,9 +235,21 @@ orderRouter.post(
             )
           : 0;
         metrics.pizzaPurchase(true, latencyMs, totalPrice, pizzaCount);
+        logger.log("info", "order", "order placed", {
+          orderId: order.id,
+          userId: req.user.id,
+          pizzaCount,
+          totalPrice,
+          latencyMs,
+        });
         res.send({ order, followLinkToEndChaos: j.reportUrl, jwt: j.jwt });
       } else {
         metrics.pizzaPurchase(false, latencyMs, 0, 0);
+        logger.log("warn", "order", "order failed at factory", {
+          userId: req.user.id,
+          status: r.status,
+          latencyMs,
+        });
         res.status(500).send({
           message: "Failed to fulfill order at factory",
           followLinkToEndChaos: j.reportUrl,
@@ -232,6 +258,11 @@ orderRouter.post(
     } catch (error) {
       const latencyMs = Date.now() - start;
       metrics.pizzaPurchase(false, latencyMs, 0, 0);
+      logger.log("error", "order", "order exception", {
+        userId: req.user.id,
+        error: error.message,
+        latencyMs,
+      });
       throw error;
     }
   }),
