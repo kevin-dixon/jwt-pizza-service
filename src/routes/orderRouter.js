@@ -203,7 +203,7 @@ orderRouter.post(
         order,
       };
       logger.log("info", "factory-req", "Sending order to factory", {
-        body: JSON.stringify(factoryReqBody),
+        body: JSON.stringify(logger.sanitize(factoryReqBody)),
       });
       const r = await fetch(`${config.factory.url}/api/order`, {
         method: "POST",

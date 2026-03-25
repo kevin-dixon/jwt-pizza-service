@@ -4,6 +4,7 @@ const config = require("./config.js");
 const SENSITIVE_KEYS = new Set([
   "password",
   "token",
+  "jwt",
   "authorization",
   "apikey",
   "api_key",
@@ -11,18 +12,40 @@ const SENSITIVE_KEYS = new Set([
   "cvv",
 ]);
 
+const JWT_PATTERN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+const GRAFANA_KEY_PATTERN = /^glc_[A-Za-z0-9_=.-]+$/;
+
 /**
  * Recursively mask values whose key is in SENSITIVE_KEYS.
  */
 function sanitize(obj) {
-  if (typeof obj !== "object" || obj === null) return obj;
-  if (Array.isArray(obj)) return obj.map(sanitize);
+  if (typeof obj === "string") {
+    return sanitizeString(obj);
+  }
+
+  if (typeof obj !== "object" || obj === null) {
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map((value) => sanitize(value));
+  }
 
   const out = {};
   for (const [key, value] of Object.entries(obj)) {
     out[key] = SENSITIVE_KEYS.has(key.toLowerCase()) ? "****" : sanitize(value);
   }
   return out;
+}
+
+function sanitizeString(value) {
+  const trimmed = value.trim();
+
+  if (JWT_PATTERN.test(trimmed) || GRAFANA_KEY_PATTERN.test(trimmed)) {
+    return "****";
+  }
+
+  return value.replace(/Bearer\s+[^\s]+/gi, "Bearer ****");
 }
 
 /**
@@ -73,9 +96,14 @@ function httpLogger(req, res, next) {
  * @param {object} attributes  additional key/value pairs to include in the log line
  */
 function log(level, type, message, attributes = {}) {
+  const sanitizedMessage = sanitize(message);
+  const sanitizedAttributes = sanitize(attributes);
   const line = JSON.stringify({
-    message: typeof message === "string" ? message : JSON.stringify(message),
-    ...attributes,
+    message:
+      typeof sanitizedMessage === "string"
+        ? sanitizedMessage
+        : JSON.stringify(sanitizedMessage),
+    ...sanitizedAttributes,
   });
 
   sendLogToGrafana({
