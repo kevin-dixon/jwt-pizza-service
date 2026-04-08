@@ -185,9 +185,19 @@ orderRouter.delete(
   }),
 );
 
+// chaos injection middleware
+let enableChaos = false;
+const chaosMiddleware = (req, res, next) => {
+  if (enableChaos && Math.random() < 0.5) {
+    throw new StatusCodeError("Chaos monkey", 500);
+  }
+  next();
+};
+
 // createOrder
 orderRouter.post(
   "/",
+  chaosMiddleware,
   authRouter.authenticateToken,
   asyncHandler(async (req, res) => {
     const orderReq = req.body;
@@ -268,8 +278,7 @@ orderRouter.post(
   }),
 );
 
-// chaos injection
-let enableChaos = false;
+// chaos state toggle endpoint
 orderRouter.put(
   "/chaos/:state",
   authRouter.authenticateToken,
@@ -281,12 +290,5 @@ orderRouter.put(
     res.json({ chaos: enableChaos });
   }),
 );
-
-orderRouter.post("/", (req, res, next) => {
-  if (enableChaos && Math.random() < 0.5) {
-    throw new StatusCodeError("Chaos monkey", 500);
-  }
-  next();
-});
 
 module.exports = orderRouter;
