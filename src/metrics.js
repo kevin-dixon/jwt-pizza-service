@@ -1,6 +1,5 @@
 const os = require("os");
 const config = require("./config.js");
-const { DB } = require("./database/database.js");
 
 const httpMetrics = {
   total: 0,
@@ -22,7 +21,8 @@ const pizzaMetrics = {
   latencySamples: 0,
 };
 
-let activeUsersCount = 0;
+const activeUserLastSeenMs = new Map();
+const activeUserWindowMs = Number(process.env.ACTIVE_USER_WINDOW_MS || 300000);
 
 let reporterTimer = null;
 let previousCpuSample = null;
@@ -72,19 +72,35 @@ function authAttempt(success) {
   }
 }
 
-function userLoggedIn() {}
+function userSeen(userId) {
+  if (userId) {
+    activeUserLastSeenMs.set(String(userId), Date.now());
+  }
+}
 
-function userLoggedOut() {}
+function userLoggedIn(userId) {
+  userSeen(userId);
+}
 
-async function getDerivedActiveUsersCount() {
-  try {
-    activeUsersCount = await DB.getActiveUserCount();
-  } catch (error) {
-    // Preserve last known count if the DB check fails temporarily.
-    console.error("Error deriving active users:", error.message);
+function userLoggedOut(userId) {
+  if (userId) {
+    activeUserLastSeenMs.delete(String(userId));
+  }
+}
+
+function getDerivedActiveUsersCount(nowMs = Date.now()) {
+  let activeCount = 0;
+
+  for (const [userId, lastSeenMs] of activeUserLastSeenMs.entries()) {
+    if (nowMs - lastSeenMs <= activeUserWindowMs) {
+      activeCount += 1;
+    } else {
+      // Prune stale entries so this map reflects currently active users.
+      activeUserLastSeenMs.delete(userId);
+    }
   }
 
-  return activeUsersCount;
+  return activeCount;
 }
 
 function pizzaPurchase(success, latencyMs, totalPrice, pizzaCount) {
@@ -169,9 +185,9 @@ function createMetric(
   return metric;
 }
 
-async function buildMetricBatch() {
+function buildMetricBatch() {
   const metrics = [];
-  const derivedActiveUsersCount = await getDerivedActiveUsersCount();
+  const derivedActiveUsersCount = getDerivedActiveUsersCount();
 
   metrics.push(
     createMetric("requests", httpMetrics.total, "1", "sum", { method: "ALL" }),
@@ -288,9 +304,9 @@ function startReporting(periodMs = 10000) {
     return;
   }
 
-  reporterTimer = setInterval(async () => {
+  reporterTimer = setInterval(() => {
     try {
-      sendMetricsToGrafana(await buildMetricBatch());
+      sendMetricsToGrafana(buildMetricBatch());
     } catch (error) {
       console.error("Error sending metrics:", error.message);
     }
@@ -300,6 +316,7 @@ function startReporting(periodMs = 10000) {
 module.exports = {
   requestTracker,
   authAttempt,
+  userSeen,
   userLoggedIn,
   userLoggedOut,
   pizzaPurchase,

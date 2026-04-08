@@ -13,7 +13,6 @@ function loadMetricsModule({
   cpuSamples,
   totalMemory = 100,
   freeMemory = 25,
-  activeUserCounts = [1],
 } = {}) {
   jest.resetModules();
 
@@ -21,20 +20,6 @@ function loadMetricsModule({
 
   jest.doMock("./config.js", () => ({
     metrics: metricsConfig,
-  }));
-
-  let activeUserCountIndex = 0;
-  jest.doMock("./database/database.js", () => ({
-    DB: {
-      getActiveUserCount: jest.fn(async () => {
-        const value =
-          activeUserCounts[
-            Math.min(activeUserCountIndex, activeUserCounts.length - 1)
-          ];
-        activeUserCountIndex += 1;
-        return value;
-      }),
-    },
   }));
 
   let cpuIndex = 0;
@@ -75,6 +60,7 @@ describe("metrics module", () => {
     jest.restoreAllMocks();
     delete global.fetch;
     delete process.env.NODE_ENV;
+    delete process.env.ACTIVE_USER_WINDOW_MS;
   });
 
   test("tracks requests, auth, active users, pizza metrics and sends OTEL payload", async () => {
@@ -203,68 +189,30 @@ describe("metrics module", () => {
     ).toBe(true);
   });
 
-  test("keeps previous active users value when DB derivation fails", async () => {
-    jest.resetModules();
+  test("active users age out after inactivity window", async () => {
+    process.env.ACTIVE_USER_WINDOW_MS = "1000";
+    const metrics = loadMetricsModule({ nodeEnv: "development" });
 
-    process.env.NODE_ENV = "development";
-
-    jest.doMock("./config.js", () => ({
-      metrics: {
-        source: "jwt-pizza-service-test",
-        endpointUrl: "https://example.invalid/metrics",
-        accountId: "acct",
-        apiKey: "key",
-      },
-    }));
-
-    jest.doMock("./database/database.js", () => {
-      let callCount = 0;
-      return {
-        DB: {
-          getActiveUserCount: jest.fn(async () => {
-            callCount += 1;
-            if (callCount === 1) {
-              return 4;
-            }
-            throw new Error("db unavailable");
-          }),
-        },
-      };
-    });
-
-    let cpuIndex = 0;
-    const cpuSamples = [
-      [{ times: { user: 100, nice: 0, sys: 0, irq: 0, idle: 100 } }],
-      [{ times: { user: 150, nice: 0, sys: 0, irq: 0, idle: 150 } }],
-    ];
-    jest.doMock("os", () => ({
-      cpus: jest.fn(() => {
-        const sample = cpuSamples[Math.min(cpuIndex, cpuSamples.length - 1)];
-        cpuIndex += 1;
-        return sample;
-      }),
-      totalmem: jest.fn(() => 100),
-      freemem: jest.fn(() => 25),
-    }));
-
-    const metrics = require("./metrics.js");
-    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-
+    metrics.userSeen(999);
     metrics.startReporting(1000);
-    await jest.advanceTimersByTimeAsync(2000);
+    await jest.advanceTimersByTimeAsync(3000);
 
-    const secondCallPayload = JSON.parse(global.fetch.mock.calls[1][1].body);
-    const secondMetrics =
-      secondCallPayload.resourceMetrics[0].scopeMetrics[0].metrics;
-    const activeUsersMetric = getMetricByName(
-      secondMetrics,
+    const firstCallPayload = JSON.parse(global.fetch.mock.calls[0][1].body);
+    const firstMetrics =
+      firstCallPayload.resourceMetrics[0].scopeMetrics[0].metrics;
+    const firstActiveUsersMetric = getMetricByName(
+      firstMetrics,
       "active_users_count",
     );
-    expect(activeUsersMetric.gauge.dataPoints[0].asInt).toBe(4);
-    expect(
-      errorSpy.mock.calls.some((call) =>
-        String(call[0]).includes("Error deriving active users"),
-      ),
-    ).toBe(true);
+    expect(firstActiveUsersMetric.gauge.dataPoints[0].asInt).toBe(1);
+
+    const thirdCallPayload = JSON.parse(global.fetch.mock.calls[2][1].body);
+    const thirdMetrics =
+      thirdCallPayload.resourceMetrics[0].scopeMetrics[0].metrics;
+    const thirdActiveUsersMetric = getMetricByName(
+      thirdMetrics,
+      "active_users_count",
+    );
+    expect(thirdActiveUsersMetric.gauge.dataPoints[0].asInt).toBe(0);
   });
 });
