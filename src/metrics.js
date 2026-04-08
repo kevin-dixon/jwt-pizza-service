@@ -1,5 +1,6 @@
 const os = require("os");
 const config = require("./config.js");
+const { DB } = require("./database/database.js");
 
 const httpMetrics = {
   total: 0,
@@ -21,7 +22,7 @@ const pizzaMetrics = {
   latencySamples: 0,
 };
 
-const activeUsers = new Set();
+let activeUsersCount = 0;
 
 let reporterTimer = null;
 let previousCpuSample = null;
@@ -71,16 +72,19 @@ function authAttempt(success) {
   }
 }
 
-function userLoggedIn(userId) {
-  if (userId) {
-    activeUsers.add(String(userId));
-  }
-}
+function userLoggedIn() {}
 
-function userLoggedOut(userId) {
-  if (userId) {
-    activeUsers.delete(String(userId));
+function userLoggedOut() {}
+
+async function getDerivedActiveUsersCount() {
+  try {
+    activeUsersCount = await DB.getActiveUserCount();
+  } catch (error) {
+    // Preserve last known count if the DB check fails temporarily.
+    console.error("Error deriving active users:", error.message);
   }
+
+  return activeUsersCount;
 }
 
 function pizzaPurchase(success, latencyMs, totalPrice, pizzaCount) {
@@ -165,8 +169,9 @@ function createMetric(
   return metric;
 }
 
-function buildMetricBatch() {
+async function buildMetricBatch() {
   const metrics = [];
+  const derivedActiveUsersCount = await getDerivedActiveUsersCount();
 
   metrics.push(
     createMetric("requests", httpMetrics.total, "1", "sum", { method: "ALL" }),
@@ -190,7 +195,7 @@ function buildMetricBatch() {
     }),
   );
   metrics.push(
-    createMetric("active_users_count", activeUsers.size, "", "gauge"),
+    createMetric("active_users_count", derivedActiveUsersCount, "", "gauge"),
   );
 
   metrics.push(createMetric("pizzas_sold", pizzaMetrics.sold, "1", "sum"));
@@ -283,9 +288,9 @@ function startReporting(periodMs = 10000) {
     return;
   }
 
-  reporterTimer = setInterval(() => {
+  reporterTimer = setInterval(async () => {
     try {
-      sendMetricsToGrafana(buildMetricBatch());
+      sendMetricsToGrafana(await buildMetricBatch());
     } catch (error) {
       console.error("Error sending metrics:", error.message);
     }

@@ -13,6 +13,7 @@ function loadMetricsModule({
   cpuSamples,
   totalMemory = 100,
   freeMemory = 25,
+  activeUserCounts = [1],
 } = {}) {
   jest.resetModules();
 
@@ -20,6 +21,20 @@ function loadMetricsModule({
 
   jest.doMock("./config.js", () => ({
     metrics: metricsConfig,
+  }));
+
+  let activeUserCountIndex = 0;
+  jest.doMock("./database/database.js", () => ({
+    DB: {
+      getActiveUserCount: jest.fn(async () => {
+        const value =
+          activeUserCounts[
+            Math.min(activeUserCountIndex, activeUserCounts.length - 1)
+          ];
+        activeUserCountIndex += 1;
+        return value;
+      }),
+    },
   }));
 
   let cpuIndex = 0;
@@ -99,9 +114,7 @@ describe("metrics module", () => {
     metrics.pizzaPurchase(false, 80, 0, 0);
 
     metrics.startReporting(1000);
-    jest.advanceTimersByTime(2000);
-
-    await Promise.resolve();
+    await jest.advanceTimersByTimeAsync(2000);
     expect(global.fetch).toHaveBeenCalledTimes(2);
 
     const firstCallPayload = JSON.parse(global.fetch.mock.calls[0][1].body);
@@ -148,9 +161,7 @@ describe("metrics module", () => {
     });
 
     metrics.startReporting(500);
-    jest.advanceTimersByTime(1500);
-
-    await Promise.resolve();
+    await jest.advanceTimersByTimeAsync(1500);
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -158,9 +169,7 @@ describe("metrics module", () => {
     const metrics = loadMetricsModule({ nodeEnv: "test" });
 
     metrics.startReporting(500);
-    jest.advanceTimersByTime(1500);
-
-    await Promise.resolve();
+    await jest.advanceTimersByTimeAsync(1500);
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -177,9 +186,7 @@ describe("metrics module", () => {
     });
 
     metrics.startReporting(1000);
-    jest.advanceTimersByTime(2000);
-
-    await Promise.resolve();
+    await jest.advanceTimersByTimeAsync(2000);
     expect(global.fetch).toHaveBeenCalledTimes(2);
 
     const secondCallPayload = JSON.parse(global.fetch.mock.calls[1][1].body);
@@ -192,6 +199,71 @@ describe("metrics module", () => {
     expect(
       errorSpy.mock.calls.some((call) =>
         String(call[0]).includes("Error pushing metrics"),
+      ),
+    ).toBe(true);
+  });
+
+  test("keeps previous active users value when DB derivation fails", async () => {
+    jest.resetModules();
+
+    process.env.NODE_ENV = "development";
+
+    jest.doMock("./config.js", () => ({
+      metrics: {
+        source: "jwt-pizza-service-test",
+        endpointUrl: "https://example.invalid/metrics",
+        accountId: "acct",
+        apiKey: "key",
+      },
+    }));
+
+    jest.doMock("./database/database.js", () => {
+      let callCount = 0;
+      return {
+        DB: {
+          getActiveUserCount: jest.fn(async () => {
+            callCount += 1;
+            if (callCount === 1) {
+              return 4;
+            }
+            throw new Error("db unavailable");
+          }),
+        },
+      };
+    });
+
+    let cpuIndex = 0;
+    const cpuSamples = [
+      [{ times: { user: 100, nice: 0, sys: 0, irq: 0, idle: 100 } }],
+      [{ times: { user: 150, nice: 0, sys: 0, irq: 0, idle: 150 } }],
+    ];
+    jest.doMock("os", () => ({
+      cpus: jest.fn(() => {
+        const sample = cpuSamples[Math.min(cpuIndex, cpuSamples.length - 1)];
+        cpuIndex += 1;
+        return sample;
+      }),
+      totalmem: jest.fn(() => 100),
+      freemem: jest.fn(() => 25),
+    }));
+
+    const metrics = require("./metrics.js");
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    metrics.startReporting(1000);
+    await jest.advanceTimersByTimeAsync(2000);
+
+    const secondCallPayload = JSON.parse(global.fetch.mock.calls[1][1].body);
+    const secondMetrics =
+      secondCallPayload.resourceMetrics[0].scopeMetrics[0].metrics;
+    const activeUsersMetric = getMetricByName(
+      secondMetrics,
+      "active_users_count",
+    );
+    expect(activeUsersMetric.gauge.dataPoints[0].asInt).toBe(4);
+    expect(
+      errorSpy.mock.calls.some((call) =>
+        String(call[0]).includes("Error deriving active users"),
       ),
     ).toBe(true);
   });

@@ -2,11 +2,22 @@
 
 # Check if host is provided as a command line argument
 if [ -z "$1" ]; then
-  echo "Usage: $0 <host>"
-  echo "Example: $0 http://localhost:3000"
+  echo "Usage: $0 <host> [failure-mode]"
+  echo "Example: $0 http://localhost:3000 low"
+  echo "failure-mode: off | low | medium | high (default: low)"
   exit 1
 fi
 host=$1
+failure_mode=${2:-low}
+
+case "$failure_mode" in
+  off|low|medium|high)
+    ;;
+  *)
+    echo "Error: invalid failure-mode '$failure_mode'. Use off | low | medium | high."
+    exit 1
+    ;;
+esac
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "Error: jq is required. Install jq and rerun this script."
@@ -40,6 +51,35 @@ rand_sleep() {
   sleep $(( RANDOM % ($2 - $1 + 1) + $1 ))
 }
 
+menu_ids=()
+valid_franchise_id=""
+valid_store_id=""
+
+# Pull current menu and franchise/store IDs so simulated orders track live data.
+refresh_live_order_data() {
+  local menu_response
+  local franchise_response
+
+  menu_response=$(curl -s "$host/api/order/menu")
+  mapfile -t menu_ids < <(echo "$menu_response" | jq -r '(. // [])[] | .id' | tr -d '\r')
+
+  franchise_response=$(curl -s "$host/api/franchise?page=0&limit=200&name=%2A")
+  valid_franchise_id=$(echo "$franchise_response" | jq -r 'first((.franchises // [])[]? | select((.stores // []) | length > 0) | .id) // empty' | tr -d '\r')
+  valid_store_id=$(echo "$franchise_response" | jq -r 'first((.franchises // [])[]? | select((.stores // []) | length > 0) | .stores[0].id) // empty' | tr -d '\r')
+
+  if [ -z "$valid_franchise_id" ] || [ -z "$valid_store_id" ] || [ "${#menu_ids[@]}" -eq 0 ]; then
+    return 1
+  fi
+
+  return 0
+}
+
+random_menu_id() {
+  local idx
+  idx=$(( RANDOM % ${#menu_ids[@]} ))
+  echo "${menu_ids[$idx]}"
+}
+
 # ---------------------------------------------------------------------------
 # Worker: browse the menu continuously (no auth, 3-8 s between requests)
 # ---------------------------------------------------------------------------
@@ -63,19 +103,65 @@ done &
 pid2=$!
 
 # ---------------------------------------------------------------------------
-# Worker: pizza creation failure via invalid storeId (every 3-8 minutes)
+# Worker: intentional pizza creation failures via invalid storeId.
+# Failure frequency is controlled by failure_mode.
 # ---------------------------------------------------------------------------
-while true; do
+failure_interval_seconds=60
+failure_attempts_min=1
+failure_attempts_max=2
+
+if [ "$failure_mode" = "off" ]; then
+  failure_attempts_min=0
+  failure_attempts_max=0
+elif [ "$failure_mode" = "medium" ]; then
+  failure_attempts_min=2
+  failure_attempts_max=4
+elif [ "$failure_mode" = "high" ]; then
+  failure_attempts_min=4
+  failure_attempts_max=8
+fi
+
+echo "Traffic simulator failure mode: $failure_mode (intentional bad orders=${failure_attempts_min}-${failure_attempts_max} per ${failure_interval_seconds}s)"
+
+submit_bad_order() {
+  if ! refresh_live_order_data; then
+    echo "Intentional bad order skipped: live menu/franchise/store data unavailable"
+    return
+  fi
+
+  local invalid_store_id
+  invalid_store_id=$(( valid_store_id + 999999 ))
+
   token=$(login "d@jwt.com" "diner")
   if [ -n "$token" ] && [ "$token" != "null" ]; then
-    payload='{"franchiseId":1,"storeId":9999,"items":[{"menuId":1,"description":"Veggie","price":0.0038}]}'
+    payload="{\"franchiseId\":$valid_franchise_id,\"storeId\":$invalid_store_id,\"items\":[{\"menuId\":$(random_menu_id),\"description\":\"Intentional failure\",\"price\":0.0038}]}"
     result=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$host/api/order" \
       -H 'Content-Type: application/json' -d "$payload" \
       -H "Authorization: Bearer $token")
     echo "Intentional bad order... $result"
     curl -s -o /dev/null -X DELETE "$host/api/auth" -H "Authorization: Bearer $token"
   fi
-  rand_sleep 180 480
+}
+
+while true; do
+  attempts=0
+  if [ "$failure_attempts_max" -gt 0 ]; then
+    attempts=$(( RANDOM % (failure_attempts_max - failure_attempts_min + 1) + failure_attempts_min ))
+  fi
+
+  for ((i = 1; i <= attempts; i++)); do
+    submit_bad_order
+    # Spread failures within the minute so they don't all land in a single second.
+    if [ "$i" -lt "$attempts" ]; then
+      rand_sleep 5 20
+    fi
+  done
+
+  if [ "$attempts" -eq 0 ]; then
+    echo "Intentional bad order worker paused (failure mode off)"
+  fi
+
+  sleep "$failure_interval_seconds"
 done &
 pid3=$!
 
@@ -86,11 +172,17 @@ pid3=$!
 # ---------------------------------------------------------------------------
 diner_worker() {
   local email=$1 password=$2 label=$3
-  local token result session elapsed wait count mid items payload
+  local token result session elapsed wait count items payload menu_id
 
   while true; do
     # Offline gap before next session
     rand_sleep 5 60
+
+    if ! refresh_live_order_data; then
+      echo "[$label] Live menu/franchise/store data unavailable, retrying"
+      rand_sleep 10 20
+      continue
+    fi
 
     token=$(login "$email" "$password")
     if [ -z "$token" ] || [ "$token" = "null" ]; then
@@ -110,15 +202,16 @@ diner_worker() {
       elapsed=$(( elapsed + wait ))
 
       if [ $elapsed -lt $session ]; then
-        # Buy 1-4 pizzas, random menu items 1-5
+        # Buy 1-4 pizzas, random live menu items
         count=$(( RANDOM % 4 + 1 ))
-        items='[{"menuId":1,"description":"Veggie","price":0.0038}'
-        for i in $(seq 2 $count); do
-          mid=$(( RANDOM % 5 + 1 ))
-          items="$items,{\"menuId\":$mid,\"description\":\"Pizza\",\"price\":0.0042}"
+        menu_id=$(random_menu_id)
+        items="[{\"menuId\":$menu_id,\"description\":\"Pizza\",\"price\":0.0038}"
+        for ((i = 2; i <= count; i++)); do
+          menu_id=$(random_menu_id)
+          items="$items,{\"menuId\":$menu_id,\"description\":\"Pizza\",\"price\":0.0042}"
         done
         items="$items]"
-        payload="{\"franchiseId\":1,\"storeId\":1,\"items\":$items}"
+        payload="{\"franchiseId\":$valid_franchise_id,\"storeId\":$valid_store_id,\"items\":$items}"
         result=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$host/api/order" \
           -H 'Content-Type: application/json' -d "$payload" \
           -H "Authorization: Bearer $token")
